@@ -56,9 +56,12 @@ In industrial deployments (wind turbines, aerospace transmissions, mining convey
 
 ---
 
-## 2. Dataset Technical Specifications
+## 2. Dataset Technical Specifications & Kaggle Integration
 
-### 2.1 PHM 2009 Data Challenge Dataset
+The framework leverages the standard open benchmarks directly accessible via Kaggle:
+
+### 2.1 PHM 2009 Data Challenge Dataset (NASA)
+* **Kaggle Source:** [`hetarthchopra/gearbox-fault-detection-dataset-phm-2009-nasa`](https://www.kaggle.com/datasets/hetarthchopra/gearbox-fault-detection-dataset-phm-2009-nasa)
 * **Mechanical Architecture:** Industrial generic gearbox containing input, idler, and output shafts supporting both spur and helical gear pairs.
 * **Operating Regimes:**
   * Rotational Speeds: 5 discrete input shaft frequencies: **30 Hz, 35 Hz, 40 Hz, 45 Hz, 50 Hz** (1800 to 3000 RPM).
@@ -68,12 +71,19 @@ In industrial deployments (wind turbines, aerospace transmissions, mining convey
   * Bearing Defects: Inner race fault, outer race fault, ball element fault.
   * Assembly Quirks: Eccentricity, shaft misalignment, "bad key" keyway clearance anomaly.
 * **Sensory Channels (3 Columns):**
-  1. Input Shaft Accelerometer (voltage)
-  2. Output Shaft Accelerometer (voltage)
-  3. Optical Tachometer Signal (10 pulses per shaft revolution)
+  1. `Channel 1`: Input Shaft Accelerometer (voltage)
+  2. `Channel 2`: Output Shaft Accelerometer (voltage)
+  3. `Channel 3`: Optical Tachometer Signal (10 pulses per shaft revolution — critical for Computed Order Tracking)
 * **Challenge Evaluation Standard:** System state matrix accuracy evaluated via **Hamming Distance**.
 
-### 2.2 Southeast University (SEU) Gearbox Dataset
+### 2.2 SpectraQuest Gearbox Fault Diagnosis Dataset
+* **Kaggle Source:** [`brjapon/gearbox-fault-diagnosis`](https://www.kaggle.com/datasets/brjapon/gearbox-fault-diagnosis) *(Referenced in community notebook `farshidbahrami021/gearbox-fault-detection`)*
+* **Mechanical Architecture:** SpectraQuest Gearbox Fault Diagnostics Simulator test rig.
+* **Sensory Channels (4 Channels):** 4 accelerometers mounted in four spatial directions ($a_1, a_2, a_3, a_4$).
+* **Operating Regimes:** Variable load levels from **0% to 90%** (in 10% steps: 0, 10, 20, 30, 40, 50, 60, 70, 80, 90% load).
+* **Fault Matrix:** Healthy baseline vs. Broken Tooth under multiple load levels.
+
+### 2.3 Southeast University (SEU) Gearbox Dataset
 * **Mechanical Architecture:** Drivetrain Dynamics Simulator (DDS) featuring a drive motor, planetary gearbox stage, two-stage parallel spur gearbox, and magnetic powder brake.
 * **Operating Regimes:**
   * Condition 1: **20 Hz driving frequency – 0 V load** (1200 RPM, zero torque).
@@ -86,6 +96,38 @@ In industrial deployments (wind turbines, aerospace transmissions, mining convey
 * **Fault Matrix:**
   * Gear Sub-Dataset: Healthy, Chipped Tooth, Missing/Broken Tooth, Root Crack, Surface Wear.
   * Bearing Sub-Dataset: Healthy, Inner Race (IR), Outer Race (OR), Ball Element, Compound (IR + OR).
+
+---
+
+### 2.4 Deep Audit: Standard Kaggle Notebooks vs. PhOTON-C²-UQ
+Community notebooks (such as `farshidbahrami021/gearbox-fault-detection`) provide basic data-loading routines, but they fail the GCEM Hack 5.0 problem statement on every technical requirement:
+
+```
+┌──────────────────────────────────────┬──────────────────────────────┬──────────────────────────────────┐
+│ Technical Dimension                  │ Typical Kaggle Baseline      │ PhOTON-C²-UQ Winning Innovation  │
+├──────────────────────────────────────┼──────────────────────────────┼──────────────────────────────────┤
+│ Variable Speed (RPM Fluctuation)     │ ❌ Raw time-domain FFT;      │  Computed Order Tracking (COT)  │
+│                                      │    harmonics smear and fail  │    eradicates speed variation    │
+├──────────────────────────────────────┼──────────────────────────────┼──────────────────────────────────┤
+│ Cross-Machine Generalization         │ ❌ Trained on 1 machine;     │  Deep CORAL + ProtoNet aligns   │
+│                                      │    zero domain adaptation    │    unseen machines with 1-3 shot │
+├──────────────────────────────────────┼──────────────────────────────┼──────────────────────────────────┤
+│ Failure Data Scarcity                │ ❌ Assumes balanced labels   │  Prototypical metric distance   │
+│                                      │    and lots of failure data  │    for extreme scarce anomalies  │
+├──────────────────────────────────────┼──────────────────────────────┼──────────────────────────────────┤
+│ Fault Severity Metric                │ ❌ Simple binary class (0/1) │  Analytical Sideband Ratio (SER)│
+│                                      │    cannot predict severity   │    predicts continuous damage %  │
+├──────────────────────────────────────┼──────────────────────────────┼──────────────────────────────────┤
+│ Prediction Confidence & UQ           │ ❌ Raw uncalibrated softmax  │  Evidential + Conformal Bounds   │
+│                                      │    heuristics                │    with 95% guaranteed coverage  │
+├──────────────────────────────────────┼──────────────────────────────┼──────────────────────────────────┤
+│ Lifelong Multi-Rig Adaptation        │ ❌ Single static model;      │  Collaborative FedProto + EWC   │
+│                                      │    catastrophic forgetting   │    continual lifelong learning   │
+├──────────────────────────────────────┼──────────────────────────────┼──────────────────────────────────┤
+│ Remaining Useful Life (RUL)          │ ❌ None                      │  Paris' Law crack growth prior  │
+│                                      │                              │    forecasts failure horizon     │
+└──────────────────────────────────────┴──────────────────────────────┴──────────────────────────────────┘
+```
 
 ---
 
