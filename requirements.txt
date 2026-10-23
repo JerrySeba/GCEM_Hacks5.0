@@ -1,0 +1,9 @@
+# Core requirements for offline Streamlit SCADA Dashboard
+streamlit>=1.30.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+scipy>=1.10.0
+
+# Optional requirements for local training (pre-installed in Google Colab)
+# torch>=2.0.0
+# torchvision>=0.15.0
