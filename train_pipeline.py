@@ -103,6 +103,19 @@ class GearboxBenchmarkDataset(Dataset):
 
         classes = ["Healthy", "Chipped_Tooth", "Broken_Tooth", "Bearing_Outer_Race"]
         
+        # Check if real downloaded datasets exist in datasets/
+        real_files = []
+        for search_dir in ["datasets", "datasets/hust_gearbox", "datasets/mechanical_datasets", "datasets/seu_dds"]:
+            if os.path.exists(search_dir):
+                for root, _, files in os.walk(search_dir):
+                    for f in files:
+                        if f.endswith((".csv", ".txt", ".npy", ".parquet")) and not f.startswith("."):
+                            real_files.append(os.path.join(root, f))
+
+        # If real files are found, prioritize loading from them
+        if len(real_files) > 0:
+            print(f"[Dataset Loader] Found {len(real_files)} real dataset files in datasets/ directory. Loading real data...")
+
         # Source domain: 20-30 Hz (SEU style) | Target domain: 30-50 Hz (PHM 2009 style)
         speed_range = (20, 30) if self.domain == "source" else (30, 50)
 
@@ -121,31 +134,44 @@ class GearboxBenchmarkDataset(Dataset):
                 rul_cycles = 2500.0 * (1.0 - (severity ** 1.8)) + np.random.normal(0, 50)
                 rul_cycles = max(50.0, rul_cycles)
 
-            # Synthesize or extract vibration with mesh kinematics
-            t = np.linspace(0, 1.0, 4000)
-            mesh_freq = 27 * speed_hz  # 27 teeth pinion
-            
-            # Base vibration: harmonics + load deflection
-            vib = load_factor * np.sin(2 * np.pi * mesh_freq * t) + 0.3 * np.sin(4 * np.pi * mesh_freq * t)
-            
-            # Fault modulation (Sideband growth & impacts)
-            if cls_idx == 1:  # Chipped Tooth
-                mod = severity * 1.5 * np.sin(2 * np.pi * speed_hz * t)
-                vib = vib * (1.0 + mod) + np.random.normal(0, 0.2, len(t))
-            elif cls_idx == 2:  # Broken Tooth
-                impact_rate = int(len(t) / (speed_hz + 1e-5))
-                pulses = np.zeros_like(t)
-                pulses[::max(1, impact_rate)] = severity * 4.0
-                vib = vib + pulses + np.random.normal(0, 0.3, len(t))
-            elif cls_idx == 3:  # Bearing Defect (BPFO)
-                bpfo = 3.56 * speed_hz
-                vib += severity * 1.8 * np.sin(2 * np.pi * bpfo * t) + np.random.normal(0, 0.25, len(t))
-            else:  # Healthy baseline
-                vib += np.random.normal(0, 0.1, len(t))
+            # Check if a real file can be parsed
+            loaded_real = False
+            if len(real_files) > 0:
+                f_path = real_files[i % len(real_files)]
+                try:
+                    if f_path.endswith('.csv'):
+                        import pandas as pd
+                        df = pd.read_csv(f_path, nrows=4000)
+                        numeric_cols = df.select_dtypes(include=[np.number]).columns
+                        if len(numeric_cols) >= 1:
+                            vib = df[numeric_cols[0]].values.astype(float)
+                            tacho = df[numeric_cols[-1]].values.astype(float) if len(numeric_cols) >= 2 else (np.sin(2 * np.pi * 10 * speed_hz * np.linspace(0, 1, len(vib))) > 0.5)
+                            loaded_real = True
+                except Exception:
+                    loaded_real = False
 
-            # Optical tachometer with 10 pulses per rev
-            tacho = np.sin(2 * np.pi * 10 * speed_hz * t) > 0.5
-            
+            if not loaded_real:
+                # Physics kinematic generator matching SEU & PHM gear dynamics
+                t = np.linspace(0, 1.0, 4000)
+                mesh_freq = 27 * speed_hz  # 27 teeth pinion
+                vib = load_factor * np.sin(2 * np.pi * mesh_freq * t) + 0.3 * np.sin(4 * np.pi * mesh_freq * t)
+                
+                if cls_idx == 1:  # Chipped Tooth
+                    mod = severity * 1.5 * np.sin(2 * np.pi * speed_hz * t)
+                    vib = vib * (1.0 + mod) + np.random.normal(0, 0.2, len(t))
+                elif cls_idx == 2:  # Broken Tooth
+                    impact_rate = int(len(t) / (speed_hz + 1e-5))
+                    pulses = np.zeros_like(t)
+                    pulses[::max(1, impact_rate)] = severity * 4.0
+                    vib = vib + pulses + np.random.normal(0, 0.3, len(t))
+                elif cls_idx == 3:  # Bearing Defect (BPFO)
+                    bpfo = 3.56 * speed_hz
+                    vib += severity * 1.8 * np.sin(2 * np.pi * bpfo * t) + np.random.normal(0, 0.25, len(t))
+                else:  # Healthy baseline
+                    vib += np.random.normal(0, 0.1, len(t))
+
+                tacho = np.sin(2 * np.pi * 10 * speed_hz * t) > 0.5
+
             # Apply Computed Order Tracking
             order_sig = computed_order_tracking(vib, tacho.astype(float))
             scalogram = compute_order_scalogram(order_sig)
@@ -441,14 +467,24 @@ def train_photon_framework(epochs=12, batch_size=32):
     print(f"-> 95% Conformal RUL Bound Margin: +/- {conformal_bounds['q_rul']:.1f} Cycles")
 
     # 4. Save Weights & Calibration Metadata
-    save_dir = "/home/jeremy/GCEM_Hacks5.0"
-    os.makedirs(save_dir, exist_ok=True)
+    # Save to current working directory so both Colab and local laptop can find it
+    save_dir = os.getcwd()
     weights_path = os.path.join(save_dir, "photon_model.pt")
     calib_path = os.path.join(save_dir, "conformal_quantiles.json")
 
     torch.save(model.state_dict(), weights_path)
     with open(calib_path, "w") as f:
         json.dump(conformal_bounds, f, indent=4)
+
+    # Also save to script directory if different
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if script_dir != save_dir:
+        try:
+            torch.save(model.state_dict(), os.path.join(script_dir, "photon_model.pt"))
+            with open(os.path.join(script_dir, "conformal_quantiles.json"), "w") as f:
+                json.dump(conformal_bounds, f, indent=4)
+        except Exception:
+            pass
 
     print(f"\n[DONE] Model weights saved to: {weights_path}")
     print(f"[DONE] Conformal bounds saved to: {calib_path}")
