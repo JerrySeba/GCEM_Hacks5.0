@@ -11,6 +11,7 @@
 *.tar.gz
 *.zip
 *.7z
+testData/
 !sample_data/*.csv
 
 # Python / PyTorch caches

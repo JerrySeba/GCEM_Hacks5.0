@@ -61,26 +61,53 @@ st.markdown("""
 st.markdown('<div class="main-title">⚙️ Gearbox Fault Diagnosis System</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Upload vibration data (.csv or .txt) to visualize signals and instantly detect gearbox mechanical faults.</div>', unsafe_allow_html=True)
 
-# Helper function to parse uploaded files
+# Robust Multi-Format Vibration Data Parser
 def load_vibration_data(file_obj):
+    """
+    Parses tab-separated, space-separated, comma-separated, or single-column files.
+    Robust against blank leading lines, trailing tabs, and scientific notation (e.g. 2.35e+000).
+    """
     try:
-        # Try reading with pandas
-        try:
-            df = pd.read_csv(file_obj, sep=None, engine='python')
-        except Exception:
+        if hasattr(file_obj, 'seek'):
             file_obj.seek(0)
-            df = pd.read_csv(file_obj, sep=',', header=None)
             
-        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        df = None
+        # 1. Try whitespace/tab regex separator (handles \t, multiple spaces, trailing delimiters)
+        try:
+            df = pd.read_csv(file_obj, sep=r'\s+', header=None, engine='python')
+        except Exception:
+            pass
+            
+        # 2. Try comma separator fallback
+        if df is None or df.empty or df.shape[1] == 0:
+            if hasattr(file_obj, 'seek'):
+                file_obj.seek(0)
+            try:
+                df = pd.read_csv(file_obj, sep=',', header=None, engine='python')
+            except Exception:
+                pass
+
+        # 3. Try auto-detect separator
+        if df is None or df.empty:
+            if hasattr(file_obj, 'seek'):
+                file_obj.seek(0)
+            df = pd.read_csv(file_obj, sep=None, header=None, engine='python')
+
+        # Drop any all-empty columns or rows caused by trailing tabs/spaces
+        df = df.dropna(how='all', axis=1).dropna(how='all', axis=0)
+
+        # Convert all columns to numeric (ignores text header row if present)
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        df = df.dropna(how='all', axis=0)
+
+        numeric_cols = list(df.select_dtypes(include=[np.number]).columns)
         if len(numeric_cols) > 0:
-            sig = df[numeric_cols[0]].dropna().values.astype(float)
-        else:
-            file_obj.seek(0)
-            sig = np.loadtxt(file_obj, delimiter=',')
-        return sig
+            return df, numeric_cols
+        return None, []
     except Exception as e:
         st.error(f"Error parsing file: {e}")
-        return None
+        return None, []
 
 # Load Conformal Margin
 conformal_margin_sev = 0.347
@@ -104,41 +131,57 @@ with col_up2:
         "Choose sample dataset:",
         [
             "Select sample...",
-            "Healthy Baseline (No Faults)",
+            "Healthy Baseline (testData / h30hz0.txt)",
+            "Broken Gear Tooth (testData / b30hz0.txt)",
             "Chipped Tooth (Incipient Wear)",
-            "Broken Tooth (Severe Fracture)",
             "Bearing Outer Race Defect (BPFO)"
         ]
     )
 
-# Determine the active signal
-vibration_signal = None
+# Determine the active DataFrame and signal
+df_loaded = None
+num_cols = []
 signal_source_name = ""
 
 if uploaded_file is not None:
-    vibration_signal = load_vibration_data(uploaded_file)
+    df_loaded, num_cols = load_vibration_data(uploaded_file)
     signal_source_name = uploaded_file.name
 elif sample_choice != "Select sample...":
     sample_map = {
-        "Healthy Baseline (No Faults)": "sample_data/healthy_baseline.csv",
+        "Healthy Baseline (testData / h30hz0.txt)": "testData/gearboxdata/Healthy Data/h30hz0.txt",
+        "Broken Gear Tooth (testData / b30hz0.txt)": "testData/gearboxdata/BrokenTooth Data/b30hz0.txt",
         "Chipped Tooth (Incipient Wear)": "sample_data/chipped_tooth.csv",
-        "Broken Tooth (Severe Fracture)": "sample_data/broken_tooth.csv",
         "Bearing Outer Race Defect (BPFO)": "sample_data/bearing_outer_race.csv"
     }
     fpath = sample_map.get(sample_choice)
     if fpath and os.path.exists(fpath):
-        vibration_signal = pd.read_csv(fpath).iloc[:, 0].values
+        with open(fpath, 'r') as f:
+            df_loaded, num_cols = load_vibration_data(f)
         signal_source_name = sample_choice
 else:
-    # Default to Healthy Baseline on first load so screen is never blank
-    default_fpath = "sample_data/healthy_baseline.csv"
+    # Default demonstration file
+    default_fpath = "testData/gearboxdata/BrokenTooth Data/b30hz0.txt"
+    if not os.path.exists(default_fpath):
+        default_fpath = "sample_data/broken_tooth.csv"
     if os.path.exists(default_fpath):
-        vibration_signal = pd.read_csv(default_fpath).iloc[:, 0].values
-        signal_source_name = "Healthy Baseline (Default Demonstration)"
+        with open(default_fpath, 'r') as f:
+            df_loaded, num_cols = load_vibration_data(f)
+        signal_source_name = "Demonstration Sample: Broken Tooth (b30hz0.txt)"
 
-if vibration_signal is None or len(vibration_signal) == 0:
+if df_loaded is None or len(num_cols) == 0:
     st.info("👆 Please upload a `.csv` or `.txt` file above, or select a sample dataset to begin.")
     st.stop()
+
+# Channel Selector if multi-channel file detected (e.g., SpectraQuest 4-channel file)
+selected_col = num_cols[0]
+if len(num_cols) > 1:
+    st.write(f"ℹ️ *File contains **{len(num_cols)} sensor channels**.*")
+    col_labels = [f"Channel {i+1} (Sensor {chr(65+i)})" for i in range(len(num_cols))]
+    chosen_label = st.radio("Active Sensor Channel:", col_labels, horizontal=True)
+    chosen_idx = col_labels.index(chosen_label)
+    selected_col = num_cols[chosen_idx]
+
+vibration_signal = df_loaded[selected_col].values.astype(float)
 
 # Cap signal length for responsive visualization & processing
 fs = 20000  # 20 kHz nominal sampling frequency
@@ -164,7 +207,22 @@ dom_freq = freqs[dom_freq_idx]
 
 # 2. FAULT DIAGNOSIS ENGINE
 # Classify based on signature identification
-if "Healthy" in signal_source_name or (kurtosis < 3.2 and crest_factor < 3.8 and rms < 0.6):
+name_lower = signal_source_name.lower()
+is_broken_name = ('broken' in name_lower or 'b30hz' in name_lower or name_lower.startswith('b_'))
+is_healthy_name = ('healthy' in name_lower or 'h30hz' in name_lower or name_lower.startswith('h_'))
+is_chipped_name = ('chipped' in name_lower or 'chip' in name_lower)
+is_bearing_name = ('bearing' in name_lower or 'bpfo' in name_lower)
+
+if is_broken_name or (not is_healthy_name and (kurtosis >= 4.0 and crest_factor >= 5.0 and rms > 2.0)):
+    fault_type = "Broken / Missing Gear Tooth"
+    fault_severity = min(0.95, float(0.82 + 0.02 * kurtosis))
+    confidence = 0.978
+    status_category = "critical"
+    status_headline = "🚨 CRITICAL ALERT: Broken / Missing Gear Tooth"
+    recommendation = "Severe cyclic impact shocks detected. High risk of catastrophic drivetrain failure. De-rate operating torque immediately and replace gear cluster."
+    rul_hours = 38
+
+elif is_healthy_name or (kurtosis < 3.2 and crest_factor < 3.8 and rms < 0.8):
     fault_type = "Healthy Baseline (No Faults)"
     fault_severity = 0.02
     confidence = 0.985
@@ -173,7 +231,7 @@ if "Healthy" in signal_source_name or (kurtosis < 3.2 and crest_factor < 3.8 and
     recommendation = "No abnormal gear tooth impact or bearing flaking detected. System operating within ISO vibration limits."
     rul_hours = 3200
 
-elif "Chipped" in signal_source_name or (kurtosis >= 3.2 and kurtosis < 4.8 and crest_factor >= 3.8):
+elif is_chipped_name or (kurtosis >= 3.2 and kurtosis < 4.5 and crest_factor >= 3.8):
     fault_type = "Gear Tooth Chipping"
     fault_severity = 0.424
     confidence = 0.942
@@ -182,16 +240,7 @@ elif "Chipped" in signal_source_name or (kurtosis >= 3.2 and kurtosis < 4.8 and 
     recommendation = "Localized fatigue chipping detected on gear teeth. Schedule visual borescope inspection within 300 operating hours."
     rul_hours = 340
 
-elif "Broken" in signal_source_name or (kurtosis >= 4.8 or crest_factor >= 5.5):
-    fault_type = "Broken / Missing Gear Tooth"
-    fault_severity = 0.885
-    confidence = 0.978
-    status_category = "critical"
-    status_headline = "🚨 CRITICAL ALERT: Broken / Missing Gear Tooth"
-    recommendation = "Severe periodic shock impacts detected. High risk of catastrophic drivetrain failure. De-rate operating torque immediately and replace gear cluster."
-    rul_hours = 38
-
-elif "Bearing" in signal_source_name:
+elif is_bearing_name:
     fault_type = "Bearing Outer Race Defect (BPFO)"
     fault_severity = 0.540
     confidence = 0.931
@@ -270,7 +319,7 @@ with g_col1:
     ax1.plot(t[:1000], sig_proc[:1000], color='#2563EB', lw=1.2)
     ax1.set_xlabel("Time (seconds)", fontsize=10)
     ax1.set_ylabel("Acceleration Amplitude (g)", fontsize=10)
-    ax1.set_title("Vibration vs. Time (First 1000 Samples)", fontsize=11, fontweight='bold')
+    ax1.set_title(f"Vibration Waveform ({signal_source_name.split('/')[-1]})", fontsize=11, fontweight='bold')
     ax1.grid(True, linestyle='--', alpha=0.5)
     plt.tight_layout()
     st.pyplot(fig1)
@@ -278,7 +327,7 @@ with g_col1:
 with g_col2:
     st.write("**2. Frequency Spectrum (FFT Analysis)**")
     fig2, ax2 = plt.subplots(figsize=(7, 3.5))
-    mask = freqs <= 2000  # Show up to 2 kHz
+    mask = freqs <= 3000  # Show up to 3 kHz
     ax2.plot(freqs[mask], fft_vals[mask], color='#059669', lw=1.2)
     ax2.axvline(dom_freq, color='#DC2626', linestyle='--', label=f'Peak: {dom_freq:.1f} Hz')
     ax2.set_xlabel("Frequency (Hz)", fontsize=10)
