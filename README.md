@@ -24,6 +24,12 @@ streamlit run app.py
 
 ---
 
+## 📊 Publication-Quality Validation Visuals
+![PhOTON Judge Visuals](photon_judge_visuals.png)
+*(Generated from 10-Epoch GPU Training Run: Left: Computed Order Tracking Invariance | Center: Split-Conformal 95% Confidence Intervals | Right: Paris' Law Fatigue Wear Trajectory)*
+
+---
+
 ## 📖 Strategy & Technical Documentation
 The complete master analysis, evaluation of alternative paradigms, winning system architecture, 24-hour hour-by-hour battle plan, visual guide, and pitch deck script have been compiled into:
 👉 **[GEARBOX_FAULT_DIAGNOSIS_STRATEGY.md](file:///home/jeremy/GCEM_Hacks5.0/GEARBOX_FAULT_DIAGNOSIS_STRATEGY.md)**
