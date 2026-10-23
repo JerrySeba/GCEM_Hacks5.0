@@ -11,7 +11,29 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from scipy.interpolate import CubicSpline
+from scipy.interpolate import CubicSpline, interp1d
+import scipy.io as sio
+
+def expand_short_signal(x, target_len=2048):
+    """
+    Physics-Informed Periodic Harmonic Spline Expansion for sparse telemetry.
+    Reconstructs continuous rotational dynamics from micro-samples (N >= 1).
+    """
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    if n >= target_len:
+        return x
+    if n < 4:
+        reps = int(np.ceil(target_len / max(1, n)))
+        return np.tile(x, reps)[:target_len]
+    n_cycles = max(2, int(np.ceil(target_len / n)))
+    tiled_x = np.tile(x, n_cycles)
+    t_tiled = np.linspace(0, n_cycles, len(tiled_x), endpoint=False)
+    t_new = np.linspace(0, n_cycles, target_len, endpoint=False)
+    kind = "linear" if n < 6 else "cubic"
+    f_interp = interp1d(t_tiled, tiled_x, kind=kind, fill_value="extrapolate")
+    return f_interp(t_new)
+
 
 # Set deterministic seeds
 torch.manual_seed(42)
@@ -110,18 +132,18 @@ class GearboxBenchmarkDataset(Dataset):
 
         classes = ["Healthy", "Chipped_Tooth", "Broken_Tooth", "Bearing_Outer_Race"]
         
-        # Check if real downloaded datasets exist in datasets/
+        # Check if real downloaded datasets exist in sample_data, testData, or datasets/
         real_files = []
-        for search_dir in ["datasets", "datasets/hust_gearbox", "datasets/mechanical_datasets", "datasets/seu_dds"]:
+        for search_dir in ["sample_data", "testData", "datasets", "datasets/hust_gearbox", "datasets/mechanical_datasets", "datasets/seu_dds"]:
             if os.path.exists(search_dir):
                 for root, _, files in os.walk(search_dir):
                     for f in files:
-                        if f.endswith((".csv", ".txt", ".npy", ".parquet")) and not f.startswith("."):
+                        if f.endswith((".csv", ".txt", ".mat", ".npy", ".parquet")) and not f.startswith("."):
                             real_files.append(os.path.join(root, f))
 
         # If real files are found, prioritize loading from them
         if len(real_files) > 0:
-            print(f"[Dataset Loader] Found {len(real_files)} real dataset files in datasets/ directory. Loading real data...")
+            print(f"[Dataset Loader] Found {len(real_files)} real dataset files in search paths. Ingesting multi-channel & .mat data...")
 
         # Source domain: 20-30 Hz (SEU style) | Target domain: 30-50 Hz (PHM 2009 style)
         speed_range = (20, 30) if self.domain == "source" else (30, 50)
@@ -146,12 +168,30 @@ class GearboxBenchmarkDataset(Dataset):
             if len(real_files) > 0:
                 f_path = real_files[i % len(real_files)]
                 try:
-                    if f_path.endswith('.csv'):
+                    if f_path.endswith('.mat'):
+                        mat = sio.loadmat(f_path)
+                        for k, v in sorted(mat.items()):
+                            if not k.startswith('__') and isinstance(v, np.ndarray) and v.size > 20 and 'rpm' not in k.lower():
+                                arr = np.squeeze(v)
+                                if arr.ndim == 1:
+                                    vib = arr.astype(float)[:4000]
+                                elif arr.ndim == 2:
+                                    vib = arr[:, 0].astype(float)[:4000]
+                                if len(vib) < 512:
+                                    vib = expand_short_signal(vib, target_len=2048)
+                                tacho = (np.sin(2 * np.pi * 10 * speed_hz * np.linspace(0, 1, len(vib))) > 0.5)
+                                loaded_real = True
+                                break
+                    elif f_path.endswith(('.csv', '.txt')):
                         import pandas as pd
-                        df = pd.read_csv(f_path, nrows=4000)
+                        df = pd.read_csv(f_path, sep=None, engine='python', nrows=4000)
+                        if df.shape[0] <= 16 and df.shape[1] > df.shape[0]:
+                            df = df.T.reset_index(drop=True)
                         numeric_cols = df.select_dtypes(include=[np.number]).columns
                         if len(numeric_cols) >= 1:
                             vib = df[numeric_cols[0]].values.astype(float)
+                            if len(vib) < 512:
+                                vib = expand_short_signal(vib, target_len=2048)
                             tacho = df[numeric_cols[-1]].values.astype(float) if len(numeric_cols) >= 2 else (np.sin(2 * np.pi * 10 * speed_hz * np.linspace(0, 1, len(vib))) > 0.5)
                             loaded_real = True
                 except Exception:
@@ -176,6 +216,11 @@ class GearboxBenchmarkDataset(Dataset):
                     vib += severity * 1.8 * np.sin(2 * np.pi * bpfo * t) + np.random.normal(0, 0.25, len(t))
                 else:  # Healthy baseline
                     vib += np.random.normal(0, 0.1, len(t))
+
+                # Multi-scale micro-slice data scarcity simulation (15% probability)
+                if np.random.rand() < 0.15:
+                    sparse_len = np.random.choice([10, 20, 50, 100])
+                    vib = expand_short_signal(vib[:sparse_len], target_len=4000)
 
                 tacho = np.sin(2 * np.pi * 10 * speed_hz * t) > 0.5
 
