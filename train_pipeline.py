@@ -12,7 +12,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from scipy.interpolate import CubicSpline
-from scipy.signal import morlet2, cwt
 
 # Set deterministic seeds
 torch.manual_seed(42)
@@ -60,24 +59,32 @@ def computed_order_tracking(vibration_signal, tachometer_signal, fs=20000, pulse
 
 def compute_order_scalogram(order_signal, n_orders=64, scales=np.arange(1, 65)):
     """
-    Converts 1D order-resampled vibration into 2D Order-Wavelet Scalogram (64x64).
+    Converts 1D order-resampled vibration into 2D Order-Wavelet Scalogram (64x64)
+    using pure NumPy Morlet CWT. Robust across all SciPy versions (SciPy >=1.14
+    deprecated and removed scipy.signal.cwt/morlet2).
     """
-    # Segment to standard window
     window_len = 512
     if len(order_signal) > window_len:
         sig_segment = order_signal[:window_len]
     else:
         sig_segment = np.pad(order_signal, (0, window_len - len(order_signal)), mode='edge')
         
-    cwt_matrix = cwt(sig_segment, morlet2, scales, w=5)
-    scalogram = np.abs(cwt_matrix)[:, ::8]  # Downsample to 64x64
-    if scalogram.shape[1] > 64:
-        scalogram = scalogram[:, :64]
-    elif scalogram.shape[1] < 64:
-        scalogram = np.pad(scalogram, ((0, 0), (0, 64 - scalogram.shape[1])), mode='edge')
+    cwt_matrix = np.zeros((len(scales), 64), dtype=np.float32)
+    w = 5.0
+    for i, s in enumerate(scales):
+        m = min(int(np.ceil(s * 3)), 128)
+        t = np.arange(-m, m + 1) / s
+        wavelet = np.exp(1j * w * t) * np.exp(-0.5 * t**2) * (np.pi ** (-0.25)) / np.sqrt(s)
+        conv = np.convolve(sig_segment, wavelet, mode='same')
+        downsampled = np.abs(conv[:512:8])
+        if len(downsampled) >= 64:
+            cwt_matrix[i, :] = downsampled[:64]
+        else:
+            cwt_matrix[i, :len(downsampled)] = downsampled
         
     # Min-max normalization
-    scalogram = (scalogram - np.min(scalogram)) / (np.max(scalogram) - np.min(scalogram) + 1e-8)
+    min_val, max_val = np.min(cwt_matrix), np.max(cwt_matrix)
+    scalogram = (cwt_matrix - min_val) / (max_val - min_val + 1e-8)
     return scalogram.astype(np.float32)
 
 # ============================================================================
