@@ -13,8 +13,6 @@
 *.7z
 testData/
 !sample_data/*.csv
-!sample_data/*.txt
-!sample_data/*.mat
 
 # Python / PyTorch caches
 __pycache__/

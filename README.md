@@ -16,14 +16,10 @@ Click the **Open in Colab** badge above or open [`GCEM_Hacks5.0_Train.ipynb`](fi
 ### 2. Run the 100% Offline Streamlit Dashboard (Laptop / Judging)
 Once `photon_model.pt` is downloaded, launch the local judge demo:
 ```bash
-pip install -r requirements.txt
+pip install streamlit matplotlib
 streamlit run app.py
 ```
 * **Zero Wi-Fi Dependency:** Runs completely on `localhost:8501`.
-* **Universal Multi-Sensor Support:** Ingests arbitrary sensor channels ($C \ge 1$: 1, 2, 4, 8, 16+).
-* **Native MATLAB `.mat` Parsing:** Two-tier loader (`scipy.io` + `h5py` v7.3) with automatic variable harvesting across CWRU, SEU, and PHM datasets.
-* **Micro-Telemetry Resilience ($N \ge 1$):** Physics-informed periodic harmonic spline interpolation (`expand_short_signal`) enables full spectral and AI diagnosis even down to 10 samples.
-* **Direct Telemetry Paste:** Paste raw comma, space, or newline-separated vibration numbers directly into the browser without saving files.
 * **Instant Inference:** Delivers fault classification, continuous severity %, RUL horizon, and evidential uncertainty in **< 15 ms**.
 
 ---
