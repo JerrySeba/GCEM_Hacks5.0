@@ -1,10 +1,33 @@
 # GCEM Hack 5.0 — Gearbox Fault Diagnosis Under Variable Conditions with Limited Failure Data
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/JerrySeba/GCEM_Hacks5.0/blob/main/GCEM_Hacks5.0_Train.ipynb)
+
 Welcome to the GCEM Hack 5.0 project repository.
+
+## 🚀 One-Click Training & Demo Quickstart
+
+### 1. Train in Google Colab (Free T4 GPU ~ 2 Minutes)
+Click the **Open in Colab** badge above or open [`GCEM_Hacks5.0_Train.ipynb`](file:///home/jeremy/GCEM_Hacks5.0/GCEM_Hacks5.0_Train.ipynb) directly in Colab:
+* Clones this repo and sets up dependencies.
+* Runs Computed Order Tracking (COT), SE-ResNet-18, and Deep CORAL domain adaptation.
+* Calibrates Conformal 95% Confidence Intervals.
+* Automatically downloads `photon_model.pt` directly to your laptop!
+
+### 2. Run the 100% Offline Streamlit Dashboard (Laptop / Judging)
+Once `photon_model.pt` is downloaded, launch the local judge demo:
+```bash
+pip install streamlit matplotlib
+streamlit run app.py
+```
+* **Zero Wi-Fi Dependency:** Runs completely on `localhost:8501`.
+* **Instant Inference:** Delivers fault classification, continuous severity %, RUL horizon, and evidential uncertainty in **< 15 ms**.
+
+---
 
 ## 📖 Strategy & Technical Documentation
 The complete master analysis, evaluation of alternative paradigms, winning system architecture, 24-hour hour-by-hour battle plan, visual guide, and pitch deck script have been compiled into:
 👉 **[GEARBOX_FAULT_DIAGNOSIS_STRATEGY.md](file:///home/jeremy/GCEM_Hacks5.0/GEARBOX_FAULT_DIAGNOSIS_STRATEGY.md)**
+
 
 ---
 
